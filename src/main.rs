@@ -4,11 +4,14 @@
 //! wall kicks, hold, ghost piece, lock delay, T-spins and back-to-back bonuses.
 
 mod board;
+#[cfg(unix)]
+mod control;
 mod game;
 mod tetromino;
 mod ui;
 
 use std::io;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -20,18 +23,83 @@ use tetromino::Spin;
 const FRAME: Duration = Duration::from_millis(16);
 
 fn main() -> io::Result<()> {
+    let control_path = match parse_args() {
+        Ok(path) => path,
+        Err(message) => {
+            eprintln!("{message}");
+            eprintln!("usage: ratatui_tetris [--control <socket-path>]");
+            std::process::exit(2);
+        }
+    };
+
+    // Bind before taking over the terminal, so a bind failure prints cleanly.
+    #[cfg(unix)]
+    let control = match &control_path {
+        Some(path) => Some(control::listen(path)?),
+        None => None,
+    };
+    #[cfg(not(unix))]
+    let control: Option<std::sync::mpsc::Receiver<()>> = None;
+
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal);
+    let result = run(&mut terminal, control.as_ref());
     ratatui::restore();
+
+    #[cfg(unix)]
+    if let Some(path) = &control_path {
+        control::cleanup(path);
+    }
+
     result
 }
 
-fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
+fn parse_args() -> Result<Option<PathBuf>, String> {
+    let mut path = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--control" => {
+                path = Some(PathBuf::from(
+                    args.next().ok_or("--control needs a socket path")?,
+                ));
+            }
+            other => return Err(format!("unknown argument: {other}")),
+        }
+    }
+    Ok(path)
+}
+
+#[cfg(unix)]
+fn drain_control(game: &mut Game, control: Option<&std::sync::mpsc::Receiver<control::Request>>) {
+    let Some(rx) = control else { return };
+    while let Ok(request) = rx.try_recv() {
+        match request.kind {
+            control::Kind::State => {}
+            control::Kind::SetPaused(paused) => game.set_paused(paused),
+            control::Kind::Play(actions) => {
+                for action in actions {
+                    game.handle(action);
+                }
+            }
+        }
+        let _ = request.reply.send(control::state_json(game));
+    }
+}
+
+#[cfg(not(unix))]
+fn drain_control(_game: &mut Game, _control: Option<&std::sync::mpsc::Receiver<()>>) {}
+
+fn run(
+    terminal: &mut ratatui::DefaultTerminal,
+    #[cfg(unix)] control: Option<&std::sync::mpsc::Receiver<control::Request>>,
+    #[cfg(not(unix))] control: Option<&std::sync::mpsc::Receiver<()>>,
+) -> io::Result<()> {
     let mut game = Game::new();
     let mut last = Instant::now();
 
     loop {
         terminal.draw(|frame| ui::render(frame, &game))?;
+        drain_control(&mut game, control);
 
         // Spend whatever is left of this frame waiting for input, so keys feel
         // instant but an idle game still ticks at a steady rate.

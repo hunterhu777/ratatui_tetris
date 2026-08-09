@@ -319,6 +319,50 @@ mod tests {
         }
     }
 
+    /// Pin the spawn silhouette of every piece, so a misdrawn shape can't
+    /// hide behind "it looked wrong on screen".
+    #[test]
+    fn spawn_silhouettes_are_the_classic_shapes() {
+        let expected: [(Kind, &[&str]); 7] = [
+            (Kind::I, &["....", "####", "....", "...."]),
+            (Kind::O, &[".##.", ".##.", "....", "...."]),
+            (Kind::T, &[".#.", "###", "..."]),
+            (Kind::S, &[".##", "##.", "..."]),
+            (Kind::Z, &["##.", ".##", "..."]),
+            (Kind::J, &["#..", "###", "..."]),
+            (Kind::L, &["..#", "###", "..."]),
+        ];
+
+        for (kind, rows) in expected {
+            let size = kind.box_size() as usize;
+            let mut grid = vec![vec!['.'; size]; size];
+            for (x, y) in kind.cells(0) {
+                grid[y as usize][x as usize] = '#';
+            }
+            let drawn: Vec<String> = grid.into_iter().map(|r| r.into_iter().collect()).collect();
+            assert_eq!(
+                drawn,
+                rows.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
+                "{kind:?} spawn shape is wrong"
+            );
+        }
+    }
+
+    /// The nub of each three-wide piece sits over a specific end of its bar.
+    /// This is what I misread off the screen mid-game.
+    #[test]
+    fn three_wide_nubs_sit_where_expected() {
+        let nub_column = |kind: Kind| {
+            let cells = kind.cells(0);
+            let top = cells.iter().filter(|(_, y)| *y == 0).collect::<Vec<_>>();
+            assert_eq!(top.len(), 1, "{kind:?} should have a single top cell");
+            top[0].0
+        };
+        assert_eq!(nub_column(Kind::J), 0, "J's nub is over the left end");
+        assert_eq!(nub_column(Kind::T), 1, "T's nub is over the middle");
+        assert_eq!(nub_column(Kind::L), 2, "L's nub is over the right end");
+    }
+
     #[test]
     fn rotating_four_times_returns_to_start() {
         for kind in ALL_KINDS {

@@ -122,6 +122,17 @@ impl Game {
         self.phase == Phase::Paused
     }
 
+    /// Set the paused flag outright. Toggling is ambiguous for a caller that
+    /// can't see the screen, so the control channel uses this instead.
+    /// A game that is over, or mid line-clear, is left alone.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.phase = match (paused, &self.phase) {
+            (true, Phase::Falling) => Phase::Paused,
+            (false, Phase::Paused) => Phase::Falling,
+            (_, other) => other.clone(),
+        };
+    }
+
     pub fn next_pieces(&self) -> &[Kind] {
         self.bag.preview(PREVIEW_COUNT)
     }
