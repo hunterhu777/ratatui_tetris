@@ -64,12 +64,72 @@ This follows the modern Tetris guideline rather than the 1984 original:
 - **Levels** — one every 10 lines, with the guideline gravity curve
   (`(0.8 - 0.007·(level-1))^(level-1)` seconds per row).
 
+## Control socket
+
+The game can also be driven from outside the terminal:
+
+```sh
+cargo run --release -- --control /tmp/tetris.sock
+```
+
+It still renders and still takes the keyboard; this only adds a second way in.
+A client sends one command per connection and gets the resulting state back as
+one line of JSON, so a driver never has to scrape the screen.
+
+| Command | Effect |
+| --- | --- |
+| `state` | Report the current state, changing nothing |
+| `play <action> [action…]` | Apply actions in order, then report the state |
+| `pause` / `resume` | Set the paused flag explicitly |
+
+Action names are `left`, `right`, `soft`, `drop`, `cw`, `ccw`, `flip`, `hold` —
+the same moves the keys map to. Anything unparseable comes back as
+`{"error":"bad command"}`.
+
+```sh
+echo 'play cw left left drop' | nc -U /tmp/tetris.sock
+```
+
+```json
+{
+  "score": 20, "lines": 0, "level": 1,
+  "phase": "falling", "can_hold": true, "hold": null,
+  "next": ["Z"], "current": "T", "rotation": 0,
+  "piece": [[4,-1],[3,0],[4,0],[5,0]],
+  "ghost": [[4,14],[3,15],[4,15],[5,15]],
+  "grid": ["..........", "...(18 more)...", "...I......"],
+  "heights": [0,0,0,4,0,0,0,0,0,0],
+  "holes": []
+}
+```
+
+(Wrapped for reading; on the wire it is a single line.)
+
+| Field | Meaning |
+| --- | --- |
+| `phase` | `falling`, `clearing`, `paused` or `gameover` |
+| `next` | Upcoming piece letters, in order |
+| `hold` / `can_hold` | Held piece, and whether hold is available this turn |
+| `piece` / `ghost` | Four `[x, y]` cells; negative `y` is still above the well |
+| `grid` | The **locked stack only** — 20 rows of 10, `.` for empty |
+| `heights` | Per column, rows from the highest filled cell to the floor |
+| `holes` | Every `[x, y]` empty cell buried under that column's surface |
+
+The falling piece is reported separately from `grid` rather than stamped into
+it, so a driver can't confuse the two. `heights` and `holes` are computed from
+the real board, not inferred from what was drawn.
+
+All game mutation stays on the main thread — the listener thread only passes
+messages over a channel — so a client can't race the frame loop. The socket is
+off unless `--control` is given, and it is Unix-only.
+
 ## Layout
 
 | File | Responsibility |
 | --- | --- |
 | `src/tetromino.rs` | Piece shapes, colours, SRS kick tables, the 7-bag randomiser |
 | `src/board.rs` | The playfield grid: collision, line clears, ghost projection |
+| `src/control.rs` | The optional `--control` socket: commands, state JSON |
 | `src/game.rs` | Rules: gravity, locking, hold, scoring, levels, T-spins |
 | `src/ui.rs` | Rendering — playfield, panels, overlays |
 | `src/main.rs` | Terminal setup, input mapping, the frame loop |
@@ -83,10 +143,11 @@ mutates game state, so both are tested independently.
 cargo test
 ```
 
-48 tests covering rotation tables, bag fairness, line-clear mechanics, scoring
-(including a canonical T-spin double that verifies the kick tables place the
-piece in exactly the right cell), lock-delay behaviour, input mapping, and
-rendering at a range of terminal sizes.
+50 tests covering rotation tables, every piece's spawn silhouette, bag
+fairness, line-clear mechanics, scoring (including a canonical T-spin double
+that verifies the kick tables place the piece in exactly the right cell),
+lock-delay behaviour, input mapping, and rendering at a range of terminal
+sizes.
 
 To eyeball the layout without launching the game:
 
