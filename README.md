@@ -96,8 +96,4 @@ cargo test dump_layout -- --ignored --nocapture
 
 ## AI use
 
-This is a vibe-coded project: most of the code here was written by an LLM. The
-architecture is mine — the module split above, keeping the game logic free of
-any ratatui dependency, and the decision to follow the modern guideline (SRS,
-7-bag, lock delay, T-spin scoring) rather than the 1984 rules. I reviewed what
-came back and it does what I intended, but treat it accordingly.
+This is a vibe-coded project, but the main architectural design is mine.
