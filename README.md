@@ -93,3 +93,7 @@ To eyeball the layout without launching the game:
 ```sh
 cargo test dump_layout -- --ignored --nocapture
 ```
+
+## AI use
+
+This is a vibe-coded project, but the main architectural design is mine.
